@@ -1,0 +1,40 @@
+# OPTIONAL: free scheduler for GitLab-hosted code.
+# GitLab.com Free limits scheduled-pipeline frequency and compute minutes, so run the
+# 30-minute refresh from a small PUBLIC GitHub repo instead (unlimited Actions minutes).
+# Copy this file to .github/workflows/refresh-travel.yml in that repo and add the
+# repository secret CRON_SECRET (same value as in Vercel). This repo's code stays on GitLab.
+
+name: Refresh travel deals
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: refresh-travel
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger travel deals cycle
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -uo pipefail
+          # No automatic retries: each cycle can spend free LLM quota.
+          output=$(curl --silent --show-error --max-time 120 \
+            --write-out "\n%{http_code}" \
+            --request POST "https://travel.rdxdata.xyz/v1/internal/cycle" \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --header "Content-Type: application/json")
+          status=$(echo "$output" | tail -n 1)
+          body=$(echo "$output" | sed '$d')
+          echo "HTTP ${status}"
+          echo "${body}"
+          if [ "${status}" -ge 400 ]; then
+            exit 1
+          fi
